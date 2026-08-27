@@ -11,6 +11,7 @@ enabled—access to the Docker API visible through the mounted socket.
   allowlist.
 - Keep the dashboard disabled. If temporarily enabled, bind it to
   `127.0.0.1` and use an SSH tunnel.
+- Require the gateway-specific `traefik.rescue.gateway=true` label.
 - Set `providers.docker.exposedByDefault=false` and opt in each public service.
 - Attach only public front ends to the proxy network.
 - Never attach databases, message queues, backup containers, learner

@@ -16,6 +16,19 @@ small, invite-only pilot on a dedicated Linux server. A wider deployment must
 put Python Lab on a separate host because JupyterHub controls a Docker daemon
 to create learner containers.
 
+## Alpha limitations
+
+This release provides one gateway container, one persistent ACME volume, a
+stable proxy network, explicit consumer opt-in, and migration documentation.
+It does not provide:
+
+- high availability or automatic failover;
+- DNS automation or DNS-01 challenges;
+- automated ACME backup, monitoring, or alert delivery;
+- a Docker API proxy or socket-free discovery mode;
+- completed migration of the existing Demand Monitor gateway;
+- a broad public deployment security review.
+
 ## Architecture
 
 ```text
@@ -33,10 +46,20 @@ Only public web front ends join the shared `${TRAEFIK_NETWORK}`. Databases,
 Redis, MongoDB, Moodle cron, backup jobs, and learner containers remain on
 private application networks.
 
-## Prepare in WSL or Linux
+## Requirements
 
-Docker Desktop is not required. On the target Linux host or Ubuntu 24.04 in
-WSL:
+- A supported Linux host or Ubuntu 24.04 in WSL with Docker Engine.
+- Docker Compose v2 with support for `config --format json`.
+- Public DNS records for every production hostname.
+- Host ports 80 and 443 available to this gateway at cutover time.
+- A maintenance and rollback window when replacing an existing gateway.
+
+Docker Desktop is not required. Do not start Traefik Rescue while another
+gateway still owns ports 80 or 443.
+
+
+## Prepare in WSL or Linux
+On the target Linux host or Ubuntu 24.04 in WSL:
 
 ```sh
 cd /mnt/d/workspace/traefik-rescue
