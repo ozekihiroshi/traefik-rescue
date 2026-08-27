@@ -1,0 +1,61 @@
+name: traefik-rescue
+
+services:
+  traefik:
+    image: ${TRAEFIK_IMAGE:-traefik:v3.6}
+    restart: unless-stopped
+    command:
+      - --api.dashboard=false
+      - --ping=true
+      - --log.level=${TRAEFIK_LOG_LEVEL:-INFO}
+      - --log.format=json
+      - --accesslog=true
+      - --accesslog.format=json
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${TRAEFIK_NETWORK:-rescue_proxy}
+      - --providers.docker.constraints=Label(`traefik.rescue.gateway`,`true`)
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls.options=modern@file
+      - --certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.myresolver.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --certificatesresolvers.myresolver.acme.httpchallenge=true
+      - --certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web
+    ports:
+      - ${TRAEFIK_HTTP_BIND_ADDRESS:-0.0.0.0}:80:80
+      - ${TRAEFIK_HTTPS_BIND_ADDRESS:-0.0.0.0}:443:443
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_acme:/letsencrypt
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+    networks:
+      - proxy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+volumes:
+  traefik_acme:
+
+networks:
+  proxy:
+    name: ${TRAEFIK_NETWORK:-rescue_proxy}
+    driver: bridge

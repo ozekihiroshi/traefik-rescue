@@ -1,0 +1,27 @@
+services:
+  traefik:
+    command:
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --ping=true
+      - --log.level=${TRAEFIK_LOG_LEVEL:-INFO}
+      - --log.format=json
+      - --accesslog=true
+      - --accesslog.format=json
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${TRAEFIK_NETWORK:-rescue_proxy}
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls.options=modern@file
+      - --certificatesresolvers.myresolver.acme.email=${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.myresolver.acme.caserver=${ACME_CA_SERVER:-https://acme-v02.api.letsencrypt.org/directory}
+      - --certificatesresolvers.myresolver.acme.httpchallenge=true
+      - --certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web
+    ports:
+      - 127.0.0.1:8080:8080

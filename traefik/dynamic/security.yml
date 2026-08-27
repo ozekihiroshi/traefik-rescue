@@ -1,0 +1,18 @@
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: false
+        customResponseHeaders:
+          Server: ""
+
+tls:
+  options:
+    modern:
+      minVersion: VersionTLS12
+      sniStrict: true
