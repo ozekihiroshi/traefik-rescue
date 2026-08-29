@@ -1,4 +1,11 @@
 .env
+.env.*
+!.env.example
 letsencrypt/
 logs/
+private/
+certs/
+*.key
+*.pem
+*.crt
 *.local.yml

@@ -1,8 +1,9 @@
 # Consumer integration
 
-All examples assume the shared network name `rescue_proxy` and the certificate
-resolver name `myresolver`. Both are kept compatible with Moodle Rescue's
-current production Compose labels.
+This guide uses the example network name `rescue_proxy`, certificate resolver
+name `myresolver`, hostname `app.example.org`, and container port `8000`.
+Replace them through private environment values; do not commit live hostnames,
+addresses, or credentials.
 
 ## Common rules
 
@@ -15,84 +16,98 @@ networks:
     name: ${TRAEFIK_NETWORK:-rescue_proxy}
 ```
 
-Only its public web service joins `proxy`. Every public service needs an
-explicit `traefik.enable=true` label because discovery defaults to disabled.
-It also needs `traefik.rescue.gateway=true`; Traefik Rescue rejects containers
-without this gateway-specific migration label.
+Only an intentionally public front end joins `proxy`. Databases, caches,
+queues, workers, scheduled jobs, backup containers, and user workloads stay on
+private project networks.
 
-## Moodle Rescue
+Every public service needs both opt-in labels because Docker discovery defaults
+to disabled and the gateway applies a provider constraint:
 
-Moodle Rescue already has the required router labels and an external proxy
-network. Set these production values:
-
-```text
-MOODLE_HOST=learn.example.org
-TRAEFIK_NETWORK=rescue_proxy
+```yaml
+labels:
+  traefik.enable: "true"
+  traefik.rescue.gateway: "true"
 ```
 
-The Moodle web service joins both its private `internal` network and `proxy`.
-The database and cron services do not join `proxy`. Confirm that Moodle's
-generated configuration treats the deployment as an HTTPS reverse proxy.
+## Same-host Compose example
 
-The optional shared security-header middleware can be added after checking
-Moodle iframe and LTI requirements. Do not apply `frameDeny=true` blindly to
-routes that must be embedded by an approved platform.
-
-## Python Lab Rescue: same-host pilot
-
-Create a production override in Python Lab that removes its loopback port and
-joins only JupyterHub to the shared proxy network:
+The public front end joins its private application network and the shared proxy
+network. Its database joins only the private network.
 
 ```yaml
 services:
-  jupyterhub:
-    ports: []
+  web:
+    image: example/application:1.0
     labels:
-      - traefik.enable=true
-      - traefik.rescue.gateway=true
-      - traefik.docker.network=${TRAEFIK_NETWORK:-rescue_proxy}
-      - traefik.http.routers.python-lab.rule=Host(`${LAB_HOST}`)
-      - traefik.http.routers.python-lab.entrypoints=websecure
-      - traefik.http.routers.python-lab.tls.certresolver=myresolver
-      - traefik.http.services.python-lab.loadbalancer.server.port=8000
+      traefik.enable: "true"
+      traefik.rescue.gateway: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-rescue_proxy}
+      traefik.http.routers.example-app.rule: Host(`${APP_HOST}`)
+      traefik.http.routers.example-app.entrypoints: websecure
+      traefik.http.routers.example-app.tls.certresolver: ${TRAEFIK_CERT_RESOLVER:-myresolver}
+      traefik.http.routers.example-app.service: example-app
+      traefik.http.services.example-app.loadbalancer.server.port: "8000"
     networks:
-      - lab_internal
+      - application
       - proxy
 
+  db:
+    image: example/database:1.0
+    networks:
+      - application
+
 networks:
+  application:
+    driver: bridge
   proxy:
     external: true
     name: ${TRAEFIK_NETWORK:-rescue_proxy}
 ```
 
-Production values must include:
+Use globally unique router, middleware, and service names. Do not publish the
+application container port on the host when Traefik is its only intended entry
+point.
 
-```text
-LAB_HOST=lab.example.org
-LAB_AUTH_MODE=lti13
-LAB_LOCAL_DEVELOPMENT=false
-LTI13_URI_SCHEME=https
-```
+## Reverse-proxy application settings
 
-Do not run the local JWKS proxy in production. Point `LTI13_JWKS_ENDPOINT`
-directly to Moodle's public HTTPS certificate endpoint. Learner containers
-remain only on `lab_internal`; they never join `proxy`.
+Each application remains responsible for its own proxy-aware configuration.
+Verify at least the following:
 
-## Python Lab Rescue: separate-host production
+- its public base URL uses `https` and the intended hostname;
+- forwarded host and protocol headers are trusted only from the accepted proxy
+  boundary;
+- secure cookies and callback URLs use HTTPS;
+- WebSocket or streaming paths work through the proxy when required;
+- iframe policy is compatible with any intentional embedding;
+- health checks do not expose confidential data.
 
-Do not attempt to share a Docker bridge network across hosts. Attach
-JupyterHub only to its Lab host networks and publish it to a private host
-address. Configure the gateway with a file-provider service whose upstream is
-that private address, protected by a firewall or VPN. The public hostname and
-LTI endpoints remain `https://lab.example.org`.
+Do not apply the optional `secure-headers@file` middleware blindly. Its
+`frameDeny=true` setting is unsuitable for applications that must be embedded
+by an approved parent site.
 
-## Demand Monitor
+## Multiple public front ends
 
-After removing the embedded Traefik service, declare `web` as the shared
-external network or rename it to `proxy`. Only `webserver`, Growi, and other
-intentionally public front ends should join it. Database, Redis, MongoDB,
-queues, and application workers should use private project networks.
+If one application project has multiple public front ends, attach each one
+individually to `proxy` and give each route a unique name. Do not attach the
+entire private application network to Traefik.
 
-Every migrated router must keep `traefik.enable=true`, add
-`traefik.rescue.gateway=true`, use a unique router name, the `websecure`
-entrypoint, and `tls.certresolver=myresolver`.
+## Separate-host application
+
+A Docker bridge network cannot span hosts. On a separate application host,
+publish the front end only to a protected private address and firewall it to
+the gateway host or VPN. Configure Traefik's file provider with that private
+upstream. Keep the public hostname in private deployment configuration rather
+than in this repository.
+
+## Validation checklist
+
+Before deployment, render the consumer model with `docker compose config` and
+confirm:
+
+1. only intended public front ends join the external proxy network;
+2. every public front end has both required opt-in labels;
+3. `traefik.docker.network` names the same external network as the gateway;
+4. router, middleware, and service names are unique;
+5. the upstream container port is correct;
+6. no database, cache, queue, worker, backup, or workload service joins the
+   external proxy network.

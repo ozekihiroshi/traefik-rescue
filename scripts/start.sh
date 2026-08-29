@@ -3,11 +3,13 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-if [ ! -f .env ]; then
-    echo "Missing .env. Copy .env.example and set ACME_EMAIL." >&2
+env_file=${TRAEFIK_ENV_FILE:-.env}
+if [ ! -f "$env_file" ]; then
+    echo "Missing environment file: $env_file" >&2
+    echo "Copy .env.example to an ignored file or set TRAEFIK_ENV_FILE." >&2
     exit 1
 fi
 
-docker compose config --quiet
-docker compose up -d
-docker compose ps
+docker compose --env-file "$env_file" config --quiet
+docker compose --env-file "$env_file" up -d
+docker compose --env-file "$env_file" ps

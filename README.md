@@ -1,32 +1,35 @@
 # Traefik Rescue
 
-Traefik Rescue is the shared HTTPS gateway for the Rescue family of Docker
-Compose projects. It lets Moodle Rescue, Python Lab Rescue, Demand Monitor,
-Growi, and future services share ports 80 and 443 without making any one
-application own the reverse proxy.
+Traefik Rescue is a shared HTTPS gateway for independent Docker Compose
+projects. It lets multiple applications share ports 80 and 443 without making
+any one application own the reverse proxy.
 
 This repository owns only the public gateway, its certificate state, and the
-stable Docker proxy network. Databases, application data, learner workspaces,
-and application credentials stay in their respective projects.
+stable Docker proxy network. Databases, application data, workspaces, and
+application credentials stay in their respective projects.
+
+All tracked hostnames, addresses, email values, and credentials are examples.
+Site-specific configuration belongs in an ignored `.env` file or, preferably,
+in a mode-0600 environment file outside the Git checkout.
 
 ## Status
 
-This is an alpha configuration. The same-host topology is intended for a
-small, invite-only pilot on a dedicated Linux server. A wider deployment must
-put Python Lab on a separate host because JupyterHub controls a Docker daemon
-to create learner containers.
+This is an alpha configuration intended for a small, controlled deployment on
+a dedicated Linux server. High-risk workloads that control a Docker daemon or
+execute untrusted user code should be placed on a separate host and reached
+through a private network or VPN.
 
 ## Alpha limitations
 
 This release provides one gateway container, one persistent ACME volume, a
-stable proxy network, explicit consumer opt-in, and migration documentation.
-It does not provide:
+stable proxy network, explicit consumer opt-in, and a generic migration
+runbook. It does not provide:
 
 - high availability or automatic failover;
 - DNS automation or DNS-01 challenges;
 - automated ACME backup, monitoring, or alert delivery;
 - a Docker API proxy or socket-free discovery mode;
-- completed migration of the existing Demand Monitor gateway;
+- automatic migration from an existing application-owned gateway;
 - a broad public deployment security review.
 
 ## Architecture
@@ -36,14 +39,13 @@ Internet
    |
    v
 Traefik Rescue :80/:443
-   |-- Moodle Rescue       learn.example.org
-   |-- Python Lab Rescue   lab.example.org
-   |-- Demand Monitor      portal.example.org
-   `-- Growi               wiki.example.org
+   |-- app-a.example.org     public front end A
+   |-- app-b.example.org     public front end B
+   `-- admin.example.org     optional administration front end
 ```
 
-Only public web front ends join the shared `${TRAEFIK_NETWORK}`. Databases,
-Redis, MongoDB, Moodle cron, backup jobs, and learner containers remain on
+Only intentionally public front ends join the shared `${TRAEFIK_NETWORK}`.
+Databases, queues, workers, backup jobs, and user workload containers remain on
 private application networks.
 
 ## Requirements
@@ -57,39 +59,38 @@ private application networks.
 Docker Desktop is not required. Do not start Traefik Rescue while another
 gateway still owns ports 80 or 443.
 
+## Keep deployment values private
 
-## Prepare in WSL or Linux
-On the target Linux host or Ubuntu 24.04 in WSL:
+For a local evaluation, copy the tracked example to the ignored `.env` file:
 
 ```sh
-cd /mnt/d/workspace/traefik-rescue
 cp .env.example .env
 ```
 
-Set a real operational email address in `.env`. The example uses Let's Encrypt
-staging so rehearsals cannot consume production issuance limits. Change it to
-the production endpoint only for the real cutover:
+For a server, keep the real file outside the checkout:
+
+```sh
+sudo install -d -m 0700 /etc/traefik-rescue
+sudo install -m 0600 .env.example /etc/traefik-rescue/gateway.env
+sudoedit /etc/traefik-rescue/gateway.env
+```
+
+Then pass its path to every helper:
+
+```sh
+TRAEFIK_ENV_FILE=/etc/traefik-rescue/gateway.env sh scripts/verify.sh
+TRAEFIK_ENV_FILE=/etc/traefik-rescue/gateway.env sh scripts/start.sh
+TRAEFIK_ENV_FILE=/etc/traefik-rescue/gateway.env sh scripts/stop.sh
+```
+
+See [private deployment configuration](docs/private-configuration.md) for the
+boundary between published examples and private operational state.
+
+The example uses the Let's Encrypt staging endpoint so rehearsals cannot
+consume production issuance limits. Change it only for the real cutover:
 
 ```text
 ACME_CA_SERVER=https://acme-v02.api.letsencrypt.org/directory
-```
-
-Validate before starting:
-
-```sh
-sh scripts/verify.sh
-```
-
-Start the gateway only after ports 80 and 443 are free:
-
-```sh
-sh scripts/start.sh
-```
-
-Stop without deleting certificate state or the shared network:
-
-```sh
-sh scripts/stop.sh
 ```
 
 Do not run `docker compose down -v` during an ordinary stop. The `-v` option
@@ -101,7 +102,8 @@ The production Compose file does not expose the Traefik dashboard. For local
 administrative diagnostics only, bind it to loopback:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.dashboard.yml up -d
+docker compose --env-file /path/to/gateway.env \
+  -f docker-compose.yml -f docker-compose.dashboard.yml up -d
 ```
 
 Then use an SSH tunnel or open `http://127.0.0.1:8080/dashboard/` on the host.
@@ -118,25 +120,14 @@ networks:
     name: ${TRAEFIK_NETWORK:-rescue_proxy}
 ```
 
-Only its public service joins `proxy`. It must opt in explicitly with
-both `traefik.enable=true` and `traefik.rescue.gateway=true`. The second label
+Only its public service joins `proxy`. It must opt in explicitly with both
+`traefik.enable=true` and `traefik.rescue.gateway=true`. The second label
 prevents this gateway from adopting containers that belong to an older or
-unrelated Traefik deployment. See [consumer integration](docs/consumer-integration.md)
-for Moodle, Python Lab, and Demand Monitor examples.
+unrelated Traefik deployment.
 
-## Migration from Demand Monitor
-
-The existing Traefik in Demand Monitor currently owns ports 80 and 443. Do not
-start this project at the same time. Follow the staged runbook in
-[migration-from-demand-monitor.md](docs/migration-from-demand-monitor.md):
-
-1. Validate this project without starting it.
-2. Connect and validate each consumer Compose model.
-3. Back up the existing ACME state.
-4. Schedule a maintenance window.
-5. Stop only the old Traefik service.
-6. Start Traefik Rescue and test every hostname.
-7. Remove the old service definition only after successful observation.
+See [consumer integration](docs/consumer-integration.md) for a generic Compose
+template and [migration from an embedded gateway](docs/migration-from-embedded-gateway.md)
+for a staged cutover and rollback process.
 
 ## Security boundary
 
@@ -144,12 +135,13 @@ The Docker provider currently reads the local Docker socket. The read-only
 mount prevents changing the socket file but does not make Docker API access
 harmless. Treat compromise of Traefik as potential compromise of the Docker
 host. Keep the image pinned, expose no dashboard, and use a dedicated host for
-the pilot. A later hardening stage may replace Docker discovery with explicit
-file-provider routes or a narrowly filtered Docker API proxy.
+the accepted trust boundary. A later hardening stage may replace Docker
+discovery with explicit file-provider routes or a narrowly filtered Docker API
+proxy.
 
 See [SECURITY.md](SECURITY.md) before any public deployment.
 
 ## License
 
-Copyright © 2026 Hiroshi Ozeki. Licensed under GNU GPL version 3 or, at your
+Copyright (c) 2026 Hiroshi Ozeki. Licensed under GNU GPL version 3 or, at your
 option, any later version. See [LICENSE](LICENSE).
